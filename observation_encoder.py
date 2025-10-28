@@ -5,7 +5,6 @@ class MLPEncoder(nn.Module):
     '''
     Simple MLP based encoder, used when dealing with state based observations
     '''
-    
     def __init__(self, state_dim, observation_embed_dim ):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, 256)
