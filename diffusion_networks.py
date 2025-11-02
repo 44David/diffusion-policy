@@ -2,11 +2,15 @@
 Networks used to build the diffusion policy.
 '''
 
+from ftplib import all_errors
 from typing import Union
 from turtle import update
 import torch.nn as nn
 import torch 
 import math 
+# import diffusers
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+
 
 class SinusodialPosEmb(nn.Module):
     def __init__(self, dim):
@@ -68,6 +72,7 @@ class ConditionalResidualBlock(nn.Module):
         
         conditional_channels = output_channels * 2
         self.output_channels = output_channels
+        
         self.conditional_encoder = nn.Sequential(
             nn.Mish(),
             nn.Linear(conditional_dim, conditional_channels),
@@ -79,14 +84,14 @@ class ConditionalResidualBlock(nn.Module):
         
     def forward(self, x, conditional):
         ''''
-        x = [batch_size, input_channels, horizon] <- horizon?
+        x = [batch_size, input_channels, horizon]  
         conditional = [batch_size, conditional_dimension]
         
         return:
         
         out = [batch_size, output_channels, horizon]
         '''
-
+        
         out = self.blocks[0](x) # do only the first conv block on input x
         embedding = self.conditional_encoder(conditional)
         embedding = embedding.reshape(embedding.shape[0], 2, self.output_channels, 1)
@@ -111,17 +116,18 @@ class ConditionalUnet1D(nn.Module):
         diffusion_step_embed = dimension of pos encoding for each diff. iter k
         down_dims = channel size of each UNet level
         '''
-    
+        
         super().__init__()
         all_dims = [input_dim] + list(down_dims)
-        start_dim = down_dims[0] # start of UNet?
+        start_dim = down_dims[0] # start of UNet
+        
         
         # The diffusion step encoder tells the noise prediction network how much noise is in a sample
         diffusion_step_encoder = nn.Sequential(
             SinusodialPosEmb(diffusion_step_embed_dim),
             nn.Linear(diffusion_step_embed_dim, diffusion_step_embed_dim*4),
             nn.Mish(),
-            nn.Linear(diffusion_step_embed_dim, diffusion_step_embed_dim*4)
+            nn.Linear(diffusion_step_embed_dim*4, diffusion_step_embed_dim)
         )
         
         conditional_dim = diffusion_step_embed_dim + global_conditional_dim
@@ -192,12 +198,12 @@ class ConditionalUnet1D(nn.Module):
     
     def forward(self, sample: torch.Tensor, timesteps: Union[torch.Tensor, float, int], global_conditional=None):
         '''
-        sample = (batch_size, timestep, input_dim)
+        sample = (batch_size, trajectory, input_dim)
         timesteps = (batch_size, ) or diffusion step
         global_condition = (batch_size, condition_dim)
         
         return:
-        output = (batch_size, timestep, input_dim)
+        output = (batch_size, trajectory, input_dim)
         '''
         
         # (batch_size, input_dim, timestep)        
@@ -224,6 +230,7 @@ class ConditionalUnet1D(nn.Module):
         Run the UNet
         '''
         h = []
+        
         for _, (resnet, resnet2, downsample) in enumerate(self.down_modules):
             sample = resnet(sample, global_feature)
             sample = resnet2(sample, global_feature)
@@ -231,10 +238,10 @@ class ConditionalUnet1D(nn.Module):
             sample = downsample(sample)
         
         for middle_module in self.mid_modules:
-            sample =  middle_module(sample, global_feature)
+            sample = middle_module(sample, global_feature)
             
         for _, (resnet, resnet2, upsample) in enumerate(self.up_modules):
-            sample = torch.cat(sample, h.pop(), dim=1)
+            sample = torch.cat((sample, h.pop()), dim=1)
             sample = resnet(sample, global_feature)
             sample = resnet2(sample, global_feature)
             sample = upsample(sample)
